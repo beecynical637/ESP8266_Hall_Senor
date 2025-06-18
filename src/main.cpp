@@ -67,14 +67,18 @@ void IRAM_ATTR hallTrigger2() {
 void calculateRPM() {
   unsigned long currentMillis = millis();
   if (triggered1) {
-    if (pulseInterval1 > 0) {
+    if (pulseInterval1 > 0 && pulseInterval1 < 60000) { // Добавлена проверка на разумные значения
       rpm1 = 60000.0 / pulseInterval1;
+      // Ограничение максимального значения для стабильности
+      if (rpm1 > 9999) rpm1 = 9999;
     }
     triggered1 = false;
   }
   if (triggered2) {
-    if (pulseInterval2 > 0) {
+    if (pulseInterval2 > 0 && pulseInterval2 < 60000) { // Добавлена проверка на разумные значения
       rpm2 = 60000.0 / pulseInterval2;
+      // Ограничение максимального значения для стабильности
+      if (rpm2 > 9999) rpm2 = 9999;
     }
     triggered2 = false;
   }
@@ -85,8 +89,16 @@ void calculateRPM() {
 }
 
 void updateDisplays() {
-  display1.showNumberDecEx((int)rpm1, 0b01000000, false); // Датчик 1
-  display2.showNumberDecEx((int)rpm2, 0b01000000, false); // Датчик 2
+  // Исправлено отображение на дисплеях с корректным приведением типов
+  int displayRpm1 = (int)round(rpm1);
+  int displayRpm2 = (int)round(rpm2);
+  
+  // Ограничение для 4-разрядного дисплея
+  if (displayRpm1 > 9999) displayRpm1 = 9999;
+  if (displayRpm2 > 9999) displayRpm2 = 9999;
+  
+  display1.showNumberDecEx(displayRpm1, 0, true); // Убрана точка, добавлено ведущие нули
+  display2.showNumberDecEx(displayRpm2, 0, true); // Убрана точка, добавлено ведущие нули
 }
 
 void updateHistory() {
@@ -103,6 +115,7 @@ void updateHistory() {
   }
 }
 
+// Остальной код остается без изменений...
 String getHTML() {
   return R"rawliteral(
   <!DOCTYPE html>
@@ -368,6 +381,7 @@ String getHTML() {
   )rawliteral";
 }
 
+// Остальные функции остаются без изменений
 void handleSensorData(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(2048);
   doc["rpm1"] = rpm1;
