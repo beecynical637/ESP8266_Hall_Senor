@@ -10,7 +10,7 @@
 #define CLK_PIN1 D1
 #define DIO_PIN1 D2
 
-// Пины для второго дисплея (Датчик 2)
+// Пины для второго дисплея (Датчик 2)  
 #define CLK_PIN2 D3
 #define DIO_PIN2 D4
 
@@ -19,22 +19,29 @@ TM1637Display display2(CLK_PIN2, DIO_PIN2); // Дисплей для датчи�
 
 #define HALL1_DIGITAL_PIN D5  // Датчик Холла 1
 #define HALL2_DIGITAL_PIN D6  // Датчик Холла 2
-#define DEBOUNCE_DELAY 50
+#define DEBOUNCE_DELAY 5      // Уменьшен для высоких оборотов
 #define MAX_DATA_POINTS 60
 
 AsyncWebServer server(80);
 bool darkMode = false;
 bool recording = false;
 
+// Переменные для более точного измерения времени
 volatile unsigned long lastTriggerTime1 = 0;
-volatile unsigned long pulseInterval1 = 0;
+volatile unsigned long currentTriggerTime1 = 0;
 volatile bool triggered1 = false;
 volatile unsigned long lastTriggerTime2 = 0;
-volatile unsigned long pulseInterval2 = 0;
+volatile unsigned long currentTriggerTime2 = 0;
 volatile bool triggered2 = false;
 
 float rpm1 = 0.0; // RPM для датчика 1
 float rpm2 = 0.0; // RPM для датчика 2
+
+// Для сглаживания показаний
+#define SMOOTHING_SAMPLES 3
+float rpm1Samples[SMOOTHING_SAMPLES];
+float rpm2Samples[SMOOTHING_SAMPLES];
+int sampleIndex = 0;
 
 float rpm1History[MAX_DATA_POINTS];
 float rpm2History[MAX_DATA_POINTS];
@@ -45,9 +52,10 @@ bool dataFull = false;
 void IRAM_ATTR hallTrigger1() {
   static unsigned long lastDebounceTime = 0;
   unsigned long currentMillis = millis();
+  
+  // Более быстрый дебаунс для высоких оборотов
   if ((currentMillis - lastDebounceTime) > DEBOUNCE_DELAY) {
-    pulseInterval1 = currentMillis - lastTriggerTime1;
-    lastTriggerTime1 = currentMillis;
+    currentTriggerTime1 = currentMillis;
     triggered1 = true;
     lastDebounceTime = currentMillis;
   }
@@ -56,40 +64,72 @@ void IRAM_ATTR hallTrigger1() {
 void IRAM_ATTR hallTrigger2() {
   static unsigned long lastDebounceTime = 0;
   unsigned long currentMillis = millis();
+  
+  // Более быстрый дебаунс для высоких оборотов
   if ((currentMillis - lastDebounceTime) > DEBOUNCE_DELAY) {
-    pulseInterval2 = currentMillis - lastTriggerTime2;
-    lastTriggerTime2 = currentMillis;
+    currentTriggerTime2 = currentMillis;
     triggered2 = true;
     lastDebounceTime = currentMillis;
   }
 }
 
+float getAverageRPM(float samples[], float newSample) {
+  // Добавляем новый образец
+  samples[sampleIndex] = newSample;
+  sampleIndex = (sampleIndex + 1) % SMOOTHING_SAMPLES;
+  
+  // Считаем среднее значение
+  float sum = 0;
+  for (int i = 0; i < SMOOTHING_SAMPLES; i++) {
+    sum += samples[i];
+  }
+  return sum / SMOOTHING_SAMPLES;
+}
+
 void calculateRPM() {
   unsigned long currentMillis = millis();
-  if (triggered1) {
-    if (pulseInterval1 > 0 && pulseInterval1 < 60000) { // Добавлена проверка на разумные значения
-      rpm1 = 60000.0 / pulseInterval1;
-      // Ограничение максимального значения для стабильности
-      if (rpm1 > 9999) rpm1 = 9999;
+  
+  if (triggered1 && lastTriggerTime1 > 0) {
+    unsigned long pulseInterval = currentTriggerTime1 - lastTriggerTime1;
+    
+    // Проверка на разумные значения: от 20ms (3000 RPM) до 3000ms (20 RPM)
+    if (pulseInterval >= 20 && pulseInterval <= 3000) {
+      float instantRpm = 60000.0 / (float)pulseInterval;
+      
+      // Ограничение для предотвращения сбоев
+      if (instantRpm <= 5000) {
+        rpm1 = getAverageRPM(rpm1Samples, instantRpm);
+      }
     }
+    
+    lastTriggerTime1 = currentTriggerTime1;
     triggered1 = false;
   }
-  if (triggered2) {
-    if (pulseInterval2 > 0 && pulseInterval2 < 60000) { // Добавлена проверка на разумные значения
-      rpm2 = 60000.0 / pulseInterval2;
-      // Ограничение максимального значения для стабильности
-      if (rpm2 > 9999) rpm2 = 9999;
+  
+  if (triggered2 && lastTriggerTime2 > 0) {
+    unsigned long pulseInterval = currentTriggerTime2 - lastTriggerTime2;
+    
+    // Проверка на разумные значения: от 20ms (3000 RPM) до 3000ms (20 RPM)
+    if (pulseInterval >= 20 && pulseInterval <= 3000) {
+      float instantRpm = 60000.0 / (float)pulseInterval;
+      
+      // Ограничение для предотвращения сбоев
+      if (instantRpm <= 5000) {
+        rpm2 = getAverageRPM(rpm2Samples, instantRpm);
+      }
     }
+    
+    lastTriggerTime2 = currentTriggerTime2;
     triggered2 = false;
   }
   
-  // Сброс RPM при отсутствии сигнала
-  if (currentMillis - lastTriggerTime1 > 2000) rpm1 = 0.0;
-  if (currentMillis - lastTriggerTime2 > 2000) rpm2 = 0.0;
+  // Сброс RPM при отсутствии сигнала (увеличено время для высоких оборотов)
+  if (currentMillis - lastTriggerTime1 > 1500) rpm1 = 0.0;
+  if (currentMillis - lastTriggerTime2 > 1500) rpm2 = 0.0;
 }
 
 void updateDisplays() {
-  // Исправлено отображение на дисплеях с корректным приведением типов
+  // Корректное приведение типов с округлением
   int displayRpm1 = (int)round(rpm1);
   int displayRpm2 = (int)round(rpm2);
   
@@ -97,8 +137,8 @@ void updateDisplays() {
   if (displayRpm1 > 9999) displayRpm1 = 9999;
   if (displayRpm2 > 9999) displayRpm2 = 9999;
   
-  display1.showNumberDecEx(displayRpm1, 0, true); // Убрана точка, добавлено ведущие нули
-  display2.showNumberDecEx(displayRpm2, 0, true); // Убрана точка, добавлено ведущие нули
+  display1.showNumberDecEx(displayRpm1, 0, true);
+  display2.showNumberDecEx(displayRpm2, 0, true);
 }
 
 void updateHistory() {
@@ -115,7 +155,6 @@ void updateHistory() {
   }
 }
 
-// Остальной код остается без изменений...
 String getHTML() {
   return R"rawliteral(
   <!DOCTYPE html>
@@ -260,7 +299,7 @@ String getHTML() {
         applyTheme(localStorage.getItem('theme') || 'light');
         initChart();
         updateSensorData();
-        setInterval(updateSensorData, 1000);
+        setInterval(updateSensorData, 500); // Увеличена частота обновления
       });
 
       function toggleTheme() {
@@ -320,7 +359,8 @@ String getHTML() {
               y: {
                 title: { display: true, text: 'Обороты в минуту (RPM)', color: '#1a1a1a' },
                 ticks: { color: '#1a1a1a' },
-                beginAtZero: true
+                beginAtZero: true,
+                max: 3500 // Увеличен максимум для двигателя 3К
               }
             },
             plugins: {
@@ -381,7 +421,6 @@ String getHTML() {
   )rawliteral";
 }
 
-// Остальные функции остаются без изменений
 void handleSensorData(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(2048);
   doc["rpm1"] = rpm1;
@@ -448,6 +487,12 @@ void setup() {
   EEPROM.begin(1);
   darkMode = EEPROM.read(0);
 
+  // Инициализация массивов сглаживания
+  for (int i = 0; i < SMOOTHING_SAMPLES; i++) {
+    rpm1Samples[i] = 0.0;
+    rpm2Samples[i] = 0.0;
+  }
+
   pinMode(HALL1_DIGITAL_PIN, INPUT_PULLUP);
   pinMode(HALL2_DIGITAL_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(HALL1_DIGITAL_PIN), hallTrigger1, FALLING);
@@ -496,8 +541,7 @@ void loop() {
   calculateRPM();
   
   static unsigned long lastUpdate = 0;
-  if (millis() - lastUpdate >= 1000) {
-    lastUpdate = millis();
+  if (millis() - lastUpdate >= 500) {
     updateHistory();
     updateDisplays();
   }
