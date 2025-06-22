@@ -6,19 +6,21 @@
 #include <ArduinoJson.h>
 #include "wifi_credentials.h"
 
-// Display pins
+// Display 1 pins
 #define CLK_PIN1 D1
 #define DIO_PIN1 D2
+
+// Display 2 pins
 #define CLK_PIN2 D3
 #define DIO_PIN2 D4
 
 TM1637Display display1(CLK_PIN1, DIO_PIN1);
 TM1637Display display2(CLK_PIN2, DIO_PIN2);
 
-#define HALL1_DIGITAL_PIN D5
-#define HALL2_DIGITAL_PIN D6
+#define HALL1_DIGITAL_PIN D5  // Hall sensor 1
+#define HALL2_DIGITAL_PIN D6  // Hall sensor 2
 #define DEBOUNCE_DELAY 50
-#define MAX_DATA_POINTS 60
+#define MAX_DATA_POINTS 300   // 5 minutes at 100ms frequency
 
 AsyncWebServer server(80);
 bool darkMode = false;
@@ -85,7 +87,7 @@ void calculateRPM() {
     triggered2 = false;
   }
   
-  // Reset RPM if no signal
+  // Reset RPM when no signal
   if (currentMillis - lastTriggerTime1 > 2000) rpm1 = 0.0;
   if (currentMillis - lastTriggerTime2 > 2000) rpm2 = 0.0;
 }
@@ -97,8 +99,8 @@ void updateDisplays() {
   if (displayRpm1 > 9999) displayRpm1 = 9999;
   if (displayRpm2 > 9999) displayRpm2 = 9999;
   
-  display1.showNumberDecEx(displayRpm1, 0, true);
-  display2.showNumberDecEx(displayRpm2, 0, true);
+  display1.showNumberDec(displayRpm1, true);
+  display2.showNumberDec(displayRpm2, true);
 }
 
 void updateHistory() {
@@ -118,11 +120,11 @@ void updateHistory() {
 String getHTML() {
   return R"rawliteral(
   <!DOCTYPE html>
-  <html lang="en">
+  <html lang="ru">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dual RPM Counter</title>
+    <title>Двойной счетчик оборотов</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -229,22 +231,22 @@ String getHTML() {
   </head>
   <body>
     <div class="container">
-      <h1>Dual RPM Counter</h1>
+      <h1>Двойной счетчик оборотов</h1>
       <div class="buttons">
         <button class="theme-toggle" onclick="toggleTheme()">
-          <span id="theme-icon">🌙</span> Toggle Theme
+          <span id="theme-icon">🌙</span> Переключить тему
         </button>
-        <button class="download-btn" onclick="downloadData()">💾 Download Data</button>
-        <button class="record-toggle" onclick="toggleRecording()">⏺️ Start Recording</button>
+        <button class="download-btn" onclick="downloadData()">💾 Скачать данные</button>
+        <button class="record-toggle" onclick="toggleRecording()">⏺️ Начать запись</button>
       </div>
       
       <div class="sensor-data">
         <div class="sensor-card">
-          <h3>Sensor 1</h3>
+          <h3>Датчик 1</h3>
           <div class="rpm-value" id="rpm1-value"><strong>0</strong> <span>RPM</span></div>
         </div>
         <div class="sensor-card">
-          <h3>Sensor 2</h3>
+          <h3>Датчик 2</h3>
           <div class="rpm-value" id="rpm2-value"><strong>0</strong> <span>RPM</span></div>
         </div>
       </div>
@@ -259,7 +261,8 @@ String getHTML() {
         applyTheme(localStorage.getItem('theme') || 'light');
         initChart();
         updateSensorData();
-        setInterval(updateSensorData, 1000);
+        // Update rate: 100ms (10 times per second)
+        setInterval(updateSensorData, 100);
       });
 
       function toggleTheme() {
@@ -285,7 +288,7 @@ String getHTML() {
           .then(response => response.text())
           .then(data => {
             const button = document.querySelector('.record-toggle');
-            button.textContent = data === '1' ? '⏹️ Stop Recording' : '⏺️ Start Recording';
+            button.textContent = data === '1' ? '⏹️ Остановить запись' : '⏺️ Начать запись';
           });
       }
 
@@ -296,13 +299,13 @@ String getHTML() {
           data: {
             labels: [],
             datasets: [{
-              label: 'Sensor 1 (RPM)',
+              label: 'Датчик 1 (RPM)',
               borderColor: '#6200ea',
               backgroundColor: 'rgba(98, 0, 234, 0.1)',
               data: [],
               fill: false
             }, {
-              label: 'Sensor 2 (RPM)',
+              label: 'Датчик 2 (RPM)',
               borderColor: '#03dac6',
               backgroundColor: 'rgba(3, 218, 198, 0.1)',
               data: [],
@@ -313,11 +316,11 @@ String getHTML() {
             responsive: true,
             scales: {
               x: {
-                title: { display: true, text: 'Time (seconds)', color: '#1a1a1a' },
+                title: { display: true, text: 'Время (секунды)', color: '#1a1a1a' },
                 ticks: { color: '#1a1a1a' }
               },
               y: {
-                title: { display: true, text: 'Revolutions per minute (RPM)', color: '#1a1a1a' },
+                title: { display: true, text: 'Обороты в минуту (RPM)', color: '#1a1a1a' },
                 ticks: { color: '#1a1a1a' },
                 beginAtZero: true
               }
@@ -348,7 +351,7 @@ String getHTML() {
             document.querySelector('#rpm2-value strong').textContent = Math.round(data.rpm2);
             updateChart(data);
             const button = document.querySelector('.record-toggle');
-            button.textContent = data.recording ? '⏹️ Stop Recording' : '⏺️ Start Recording';
+            button.textContent = data.recording ? '⏹️ Остановить запись' : '⏺️ Начать запись';
           })
           .catch(error => {
             console.error('Error fetching sensor data:', error);
@@ -387,7 +390,7 @@ String getHTML() {
 }
 
 void handleSensorData(AsyncWebServerRequest *request) {
-  DynamicJsonDocument doc(2048);
+  DynamicJsonDocument doc(4096);
   doc["rpm1"] = rpm1;
   doc["rpm2"] = rpm2;
   doc["recording"] = recording;
@@ -408,11 +411,13 @@ void handleSensorData(AsyncWebServerRequest *request) {
 
   String json;
   serializeJson(doc, json);
+
   request->send(200, "application/json", json);
 }
 
 void handleDownloadData(AsyncWebServerRequest *request) {
-  String csv = "Time (s);RPM1;RPM2\r\n";
+  // CSV format with proper separators for Excel
+  String csv = "Время_с;RPM1;RPM2\r\n";
   
   if (dataFull) {
     for (int i = dataIndex; i < MAX_DATA_POINTS; i++) {
@@ -427,7 +432,7 @@ void handleDownloadData(AsyncWebServerRequest *request) {
     }
   }
 
-  AsyncWebServerResponse *response = request->beginResponse(200, "text/csv", csv);
+  AsyncWebServerResponse *response = request->beginResponse(200, "text/csv; charset=utf-8", csv);
   response->addHeader("Content-Disposition", "attachment; filename=rpm_data.csv");
   request->send(response);
 }
@@ -507,7 +512,8 @@ void loop() {
   static unsigned long lastUpdate = 0;
   static unsigned long lastDebugPrint = 0;
   
-  if (millis() - lastUpdate >= 1000) {
+  // Update every 100ms
+  if (millis() - lastUpdate >= 100) {
     lastUpdate = millis();
     updateHistory();
     updateDisplays();
